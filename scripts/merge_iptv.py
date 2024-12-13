@@ -266,42 +266,87 @@ async def process_channel_batch_async(channels, max_concurrent=50):
     return valid_channels
 
 def fetch_and_merge():
-    # URL列表
+    # 更新URL列表，只保留可靠的源
     urls = [
-        # 移除所有 ghp.ci 相关链接，因为域名已失效
-        "https://raw.kkgithub.com/zwc456baby/iptv_alive/master/live.txt",
-        "https://raw.kkgithub.com/Guovin/iptv-api/gd/output/result.txt",
-        "https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
-        "https://raw.githubusercontent.com/suxuang/myIPTV/main/ipv6.m3u",
-        "https://raw.githubusercontent.com/joevess/IPTV/main/home.m3u8",
-        "https://raw.githubusercontent.com/kimwang1978/collect-tv-txt/main/merged_output.txt",
-        "https://raw.githubusercontent.com/xzw832/cmys/main/S_CCTV.txt",
-        "https://raw.githubusercontent.com/xzw832/cmys/main/S_weishi.txt",
-        "https://raw.kkgithub.com/pntv/pn2024/main/pn/pn2026.txt",
+        # GitHub直链
         "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/global.m3u",
         "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u",
         "https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u",
         "https://raw.githubusercontent.com/YanG-1989/m3u/main/Gather.m3u",
-        # 添加一些备用源
-        "https://raw.fastgit.org/fanmingming/live/main/tv/m3u/global.m3u",
+        "https://raw.githubusercontent.com/suxuang/myIPTV/main/ipv6.m3u",
+        "https://raw.githubusercontent.com/joevess/IPTV/main/home.m3u8",
+        
+        # 使用代理镜像
+        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/global.m3u",
+        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u",
+        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
+        
+        # 使用jsDelivr CDN
         "https://cdn.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/global.m3u",
-        "https://raw.kkgithub.com/contractduncan/IPTV/main/广东谷豆.txt"
+        "https://cdn.jsdelivr.net/gh/YueChan/Live@main/IPTV.m3u"
     ]
     
-    # 添加重试机制
-    def fetch_url_with_retry(url, max_retries=3):
+    # 添加代理支持
+    proxies = {
+        # 如果需要代理，取消注释下面的行并填入代理地址
+        # 'http': 'http://127.0.0.1:7890',
+        # 'https': 'http://127.0.0.1:7890'
+    }
+    
+    # 改进的重试机制
+    def fetch_url_with_retry(url, max_retries=3, base_timeout=10):
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': '*/*',
+            'Connection': 'keep-alive'
+        }
+        
         for i in range(max_retries):
             try:
-                response = requests.get(url, timeout=10, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                    'Accept': '*/*'
-                })
+                # 随着重试次数增加超时时间
+                timeout = base_timeout * (i + 1)
+                response = requests.get(
+                    url,
+                    timeout=timeout,
+                    headers=headers,
+                    proxies=proxies,
+                    verify=True  # 验证SSL证书
+                )
+                
                 if response.status_code == 200:
                     return response.text
-            except Exception as e:
-                print(f"尝试 {i+1}/{max_retries} 获取 {url} 失败: {str(e)}")
+                elif response.status_code == 403:
+                    print(f"访问被拒绝 (403): {url}")
+                    break  # 不再重试
+                elif response.status_code == 404:
+                    print(f"资源不存在 (404): {url}")
+                    break  # 不再重试
+                    
+            except requests.exceptions.SSLError:
+                print(f"SSL错误: {url}")
+                # 尝试不验证SSL证书
+                try:
+                    response = requests.get(
+                        url,
+                        timeout=timeout,
+                        headers=headers,
+                        proxies=proxies,
+                        verify=False
+                    )
+                    if response.status_code == 200:
+                        return response.text
+                except Exception as e:
+                    print(f"重试 {i+1}/{max_retries} 获取 {url} 失败: {str(e)}")
+                    
+            except requests.exceptions.RequestException as e:
+                print(f"重试 {i+1}/{max_retries} 获取 {url} 失败: {str(e)}")
                 if i < max_retries - 1:
-                    time.sleep(2)  # 重试前等待2秒
+                    # 使用指数退避
+                    wait_time = 2 ** i
+                    print(f"等待 {wait_time} 秒后重试...")
+                    time.sleep(wait_time)
+                continue
+                
         return None
 
     # 使用defaultdict来存储不同分类的频道
