@@ -277,7 +277,7 @@ def fetch_and_merge():
         "https://raw.githubusercontent.com/kimwang1978/collect-tv-txt/main/merged_output.txt",
         "https://raw.githubusercontent.com/xzw832/cmys/main/S_CCTV.txt",
         "https://raw.githubusercontent.com/xzw832/cmys/main/S_weishi.txt",
-        # 添加一些稳定的源
+        "https://raw.kkgithub.com/pntv/pn2024/main/pn/pn2026.txt",
         "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/global.m3u",
         "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u",
         "https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u",
