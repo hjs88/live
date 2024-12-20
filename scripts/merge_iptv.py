@@ -340,6 +340,7 @@ def fetch_and_merge():
         "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
         "https://iptv.b2og.com/txt/ycl_iptv.txt",
         "https://iptv.b2og.com/txt/j_home.txt",
+        "http://xhztv.top/xhz/live.txt"
     ]
     
     # 添加代理支持
