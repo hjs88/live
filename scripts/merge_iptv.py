@@ -115,7 +115,7 @@ def categorize_channel(line):
         "央视频道": ["CCTV", "央视", "中国中央电视台", "CETV", "CGTN"],
         "卫视频道": ["卫视"],
         "地方频道": [
-            "浙江", "北京", "上海", "广东", "深圳", "江苏", "湖南", "山东", 
+            "汕头","浙江", "北京", "上海", "广东", "深圳", "江苏", "湖南", "山东", 
             "河南", "河北", "安徽", "东方", "东南", "厦门", "重庆", "四川",
             "贵州", "云南", "陕西", "甘肃", "青海", "内蒙古", "宁夏", "新疆",
             "西藏", "黑龙江", "吉林", "辽宁"
@@ -176,7 +176,7 @@ def standardize_category_name(category):
     
     return category.strip()
 
-async def async_check_url(url, timeout=5, max_retries=1):
+async def async_check_url(url, timeout=5, max_retries=2):
     """异步检查URL是否有效"""
     for retry in range(max_retries + 1):
         try:
@@ -184,41 +184,74 @@ async def async_check_url(url, timeout=5, max_retries=1):
             parsed = urlparse(url)
             if not all([parsed.scheme, parsed.netloc]):
                 return False
+            
+            # 检查URL协议    
+            if parsed.scheme not in ['http', 'https', 'rtmp', 'rtsp']:
+                return False
                 
-            connector = aiohttp.TCPConnector(force_close=True, enable_cleanup_closed=True, limit=0)
+            connector = aiohttp.TCPConnector(
+                force_close=True, 
+                enable_cleanup_closed=True,
+                limit=0,
+                verify_ssl=False  # 禁用SSL验证以提高性能
+            )
+            
             async with aiohttp.ClientSession(connector=connector) as session:
                 try:
                     timeout_obj = aiohttp.ClientTimeout(
                         total=timeout,
-                        connect=3,
-                        sock_connect=3,
+                        connect=2,
+                        sock_connect=2,
                         sock_read=timeout
                     )
                     
                     headers = {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Connection': 'close'
+                        'Accept': '*/*',
+                        'Connection': 'keep-alive',
+                        'Range': 'bytes=0-4095'  # 只请求前4KB数据
                     }
                     
-                    # 直接使用GET请求，移除HEAD请求
                     async with session.get(
                         url,
                         timeout=timeout_obj,
                         allow_redirects=True,
                         headers=headers
                     ) as response:
-                        return response.status == 200
+                        if response.status == 200:
+                            # 检查Content-Type
+                            content_type = response.headers.get('Content-Type', '').lower()
+                            valid_types = [
+                                'video/', 
+                                'application/vnd.apple.mpegurl',
+                                'application/x-mpegurl',
+                                'application/octet-stream'
+                            ]
+                            
+                            if any(t in content_type for t in valid_types):
+                                # 读取一小部分内容进行验证
+                                try:
+                                    content = await response.content.read(4096)
+                                    # 检查是否包含视频流特征
+                                    if (b'#EXTM3U' in content or 
+                                        b'FLV' in content or 
+                                        b'.ts' in content or 
+                                        b'.m3u8' in content):
+                                        return True
+                                except:
+                                    pass
+                        return False
                         
                 except (asyncio.TimeoutError, aiohttp.ClientError):
                     if retry == max_retries:
                         return False
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(1)
                     continue
                     
         except Exception as e:
             if retry == max_retries:
                 return False
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(1)
             continue
     return False
 
@@ -235,21 +268,27 @@ async def async_check_stream_url(channel_line):
         return channel_line
     return None
 
-async def process_channel_batch_async(channels, max_concurrent=50):
+async def process_channel_batch_async(channels, max_concurrent=30):
     """异步批量处理频道检查"""
     valid_channels = set()
+    # 减小并发数以提高稳定性
     semaphore = asyncio.Semaphore(max_concurrent)
     
     async def bounded_check(channel):
         async with semaphore:
             try:
                 result = await async_check_stream_url(channel)
-                return result
+                if result:
+                    # 添加重复性验证
+                    second_check = await async_check_stream_url(channel)
+                    if second_check:
+                        return result
+                return None
             except Exception:
                 return None
     
-    # 增大批处理大小
-    batch_size = 200
+    # 减小批处理大小以提高稳定性
+    batch_size = 100
     for i in range(0, len(channels), batch_size):
         batch = list(channels)[i:i+batch_size]
         tasks = [bounded_check(channel) for channel in batch]
@@ -261,7 +300,8 @@ async def process_channel_batch_async(channels, max_concurrent=50):
                     valid_channels.add(result)
                 pbar.update(1)
         
-        await asyncio.sleep(0.5)
+        # 增加批次间隔时间以减少压力
+        await asyncio.sleep(1)
     
     return valid_channels
 
@@ -269,21 +309,11 @@ def fetch_and_merge():
     # 更新URL列表，只保留可靠的源
     urls = [
         # GitHub直链
-        "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/global.m3u",
-        "https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/ipv6.m3u",
-        "https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u",
-        "https://raw.githubusercontent.com/YanG-1989/m3u/main/Gather.m3u",
-        "https://raw.githubusercontent.com/suxuang/myIPTV/main/ipv6.m3u",
-        "https://raw.githubusercontent.com/joevess/IPTV/main/home.m3u8",
-        
-        # 使用代理镜像
-        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/fanmingming/live/main/tv/m3u/global.m3u",
-        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/YueChan/Live/main/IPTV.m3u",
-        "https://mirror.ghproxy.com/https://raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
-        
-        # 使用jsDelivr CDN
-        "https://cdn.jsdelivr.net/gh/fanmingming/live@main/tv/m3u/global.m3u",
-        "https://cdn.jsdelivr.net/gh/YueChan/Live@main/IPTV.m3u"
+        "https://iptv.b2og.com/txt/fmml_ipv6.txt",
+        "https://iptv.b2og.com/fmml_ipv6.m3u",
+        "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
+        "https://iptv.b2og.com/txt/ycl_iptv.txt",
+        "https://iptv.b2og.com/txt/j_home.txt",
     ]
     
     # 添加代理支持
