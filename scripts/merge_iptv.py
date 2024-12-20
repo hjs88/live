@@ -8,6 +8,7 @@ import time
 import asyncio
 import aiohttp
 from tqdm import tqdm
+import argparse
 
 # 在文件顶部定义provinces列表
 PROVINCES = [
@@ -16,6 +17,15 @@ PROVINCES = [
     "云南", "陕西", "甘肃", "青海", "内蒙古", "宁夏", "新疆",
     "西藏", "黑龙江", "吉林", "辽宁"
 ]
+
+# 全局配置
+CONFIG = {
+    'ENABLE_TEST': False,  # 设置为 True 开启测试，False 关闭测试
+    'TIMEOUT': 3,  # 测试超时时间(秒)
+    'MAX_CONCURRENT': 50,  # 最大并发数
+    'BATCH_SIZE': 200,  # 批处理大小
+    'MAX_RETRIES': 1  # 最大重试次数
+}
 
 def standardize_channel_name(channel_line):
     """标准化频道名称"""
@@ -176,8 +186,39 @@ def standardize_category_name(category):
     
     return category.strip()
 
-async def async_check_url(url, timeout=5, max_retries=2):
+def parse_m3u(content):
+    """解析M3U格式内容并转换为txt格式"""
+    channels = []
+    current_name = None
+    
+    for line in content.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+            
+        if line.startswith('#EXTINF:'):
+            # 提取频道名称
+            try:
+                # 处理带有tvg-name的情况
+                if 'tvg-name="' in line:
+                    current_name = re.search('tvg-name="([^"]+)"', line).group(1)
+                else:
+                    # 提取逗号后的名称
+                    current_name = line.split(',', 1)[1].strip()
+            except:
+                current_name = None
+        elif not line.startswith('#') and current_name:
+            # 这是URL行
+            channels.append(f"{current_name},{line}")
+            current_name = None
+            
+    return '\n'.join(channels)
+
+async def async_check_url(url, timeout=None, max_retries=None):
     """异步检查URL是否有效"""
+    timeout = timeout or CONFIG['TIMEOUT']
+    max_retries = max_retries or CONFIG['MAX_RETRIES']
+    
     for retry in range(max_retries + 1):
         try:
             # 基本URL格式检查
@@ -189,69 +230,46 @@ async def async_check_url(url, timeout=5, max_retries=2):
             if parsed.scheme not in ['http', 'https', 'rtmp', 'rtsp']:
                 return False
                 
-            connector = aiohttp.TCPConnector(
-                force_close=True, 
-                enable_cleanup_closed=True,
-                limit=0,
-                verify_ssl=False  # 禁用SSL验证以提高性能
-            )
-            
+            # 对于m3u8文件，只检查文件头
+            if url.endswith('.m3u8'):
+                connector = aiohttp.TCPConnector(force_close=True, limit=0, verify_ssl=False)
+                async with aiohttp.ClientSession(connector=connector) as session:
+                    try:
+                        headers = {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Range': 'bytes=0-1024'  # 只请求前1KB
+                        }
+                        async with session.get(url, timeout=timeout, headers=headers) as response:
+                            if response.status == 1200:
+                                content = await response.content.read(1024)
+                                return b'#EXTM3U' in content
+                    except:
+                        pass
+                return False
+                
+            # 对于其他流媒体链接，使用HEAD请求
+            connector = aiohttp.TCPConnector(force_close=True, limit=0, verify_ssl=False)
             async with aiohttp.ClientSession(connector=connector) as session:
                 try:
-                    timeout_obj = aiohttp.ClientTimeout(
-                        total=timeout,
-                        connect=2,
-                        sock_connect=2,
-                        sock_read=timeout
-                    )
-                    
-                    headers = {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Accept': '*/*',
-                        'Connection': 'keep-alive',
-                        'Range': 'bytes=0-4095'  # 只请求前4KB数据
-                    }
-                    
-                    async with session.get(
-                        url,
-                        timeout=timeout_obj,
-                        allow_redirects=True,
-                        headers=headers
-                    ) as response:
+                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
+                    async with session.head(url, timeout=timeout, headers=headers) as response:
                         if response.status == 200:
-                            # 检查Content-Type
                             content_type = response.headers.get('Content-Type', '').lower()
-                            valid_types = [
-                                'video/', 
+                            return any(t in content_type for t in [
+                                'video/',
                                 'application/vnd.apple.mpegurl',
                                 'application/x-mpegurl',
                                 'application/octet-stream'
-                            ]
-                            
-                            if any(t in content_type for t in valid_types):
-                                # 读取一小部分内容进行验证
-                                try:
-                                    content = await response.content.read(4096)
-                                    # 检查是否包含视频流特征
-                                    if (b'#EXTM3U' in content or 
-                                        b'FLV' in content or 
-                                        b'.ts' in content or 
-                                        b'.m3u8' in content):
-                                        return True
-                                except:
-                                    pass
-                        return False
-                        
-                except (asyncio.TimeoutError, aiohttp.ClientError):
-                    if retry == max_retries:
-                        return False
-                    await asyncio.sleep(1)
-                    continue
+                            ])
+                except:
+                    pass
+                    
+            return False
                     
         except Exception as e:
             if retry == max_retries:
                 return False
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)  # 减少重试等待时间
             continue
     return False
 
@@ -268,27 +286,24 @@ async def async_check_stream_url(channel_line):
         return channel_line
     return None
 
-async def process_channel_batch_async(channels, max_concurrent=30):
+async def process_channel_batch_async(channels, max_concurrent=None):
     """异步批量处理频道检查"""
+    max_concurrent = max_concurrent or CONFIG['MAX_CONCURRENT']
+    batch_size = CONFIG['BATCH_SIZE']
+    
     valid_channels = set()
-    # 减小并发数以提高稳定性
     semaphore = asyncio.Semaphore(max_concurrent)
     
     async def bounded_check(channel):
         async with semaphore:
             try:
                 result = await async_check_stream_url(channel)
-                if result:
-                    # 添加重复性验证
-                    second_check = await async_check_stream_url(channel)
-                    if second_check:
-                        return result
-                return None
+                return result
             except Exception:
                 return None
     
-    # 减小批处理大小以提高稳定性
-    batch_size = 100
+    # 增大批处理大小
+    batch_size = 200
     for i in range(0, len(channels), batch_size):
         batch = list(channels)[i:i+batch_size]
         tasks = [bounded_check(channel) for channel in batch]
@@ -300,12 +315,23 @@ async def process_channel_batch_async(channels, max_concurrent=30):
                     valid_channels.add(result)
                 pbar.update(1)
         
-        # 增加批次间隔时间以减少压力
-        await asyncio.sleep(1)
+        await asyncio.sleep(0.5)  # 减少批次间延迟
     
     return valid_channels
 
+def parse_args():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description='合并IPTV直播源')
+    parser.add_argument('--no-test', action='store_true', 
+                      help='跳过直播源测试')
+    parser.add_argument('--timeout', type=int, default=3,
+                      help='测试超时时间(秒)')
+    parser.add_argument('--max-concurrent', type=int, default=50,
+                      help='最大并发数')
+    return parser.parse_args()
+
 def fetch_and_merge():
+    """获取并合并直播源"""
     # 更新URL列表，只保留可靠的源
     urls = [
         # GitHub直链
@@ -387,18 +413,22 @@ def fetch_and_merge():
     
     for url in urls:
         try:
-            # 检查缓存
             if url in url_cache:
                 content = url_cache[url]
             else:
                 print(f"\n获取 {url}...")
-                content = fetch_url_with_retry(url)
-                if content:
+                response = requests.get(url, timeout=5, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }, verify=False)
+                
+                if response.status_code == 200:
+                    content = response.text
+                    if url.endswith('.m3u') or url.endswith('.m3u8') or '#EXTM3U' in content:
+                        content = parse_m3u(content)
                     url_cache[url] = content
                 else:
-                    print(f"无法获取 {url}")
                     continue
-            
+                    
             lines = content.splitlines()
             current_category = None
             current_batch = set()
@@ -410,13 +440,21 @@ def fetch_and_merge():
                 
                 # 处理分类标题行
                 if '#genre#' in stripped_line:
-                    # 处理前一个分类的频道
-                    if current_batch:
+                    # 根据配置决定是否测试
+                    if CONFIG['ENABLE_TEST'] and current_batch:
                         print(f"\nProcessing {len(current_batch)} channels in {current_category}...")
-                        valid_channels = asyncio.run(process_channel_batch_async(current_batch))
+                        valid_channels = asyncio.run(process_channel_batch_async(
+                            current_batch, 
+                            max_concurrent=CONFIG['MAX_CONCURRENT']
+                        ))
                         if valid_channels:
                             categorized_channels[current_category].update(valid_channels)
                         current_batch.clear()
+                    else:
+                        # 不测试时直接添加所有频道
+                        if current_batch:
+                            categorized_channels[current_category].update(current_batch)
+                            current_batch.clear()
                     
                     current_category = standardize_category_name(stripped_line.split(',')[0])
                     continue
@@ -424,12 +462,10 @@ def fetch_and_merge():
                 # 处理频道行
                 if stripped_line and not stripped_line.startswith('#'):
                     if current_category:
-                        # 使用已有分类
                         standardized_channel = standardize_channel_name(stripped_line)
                         if standardized_channel:
                             current_batch.add(standardized_channel)
                     else:
-                        # 使用自动分类
                         category, channel = categorize_channel(stripped_line)
                         if category and channel:
                             category = standardize_category_name(category)
@@ -437,10 +473,17 @@ def fetch_and_merge():
             
             # 处理最后一个分类的频道
             if current_batch:
-                print(f"\nProcessing {len(current_batch)} channels in {current_category or 'uncategorized'}...")
-                valid_channels = asyncio.run(process_channel_batch_async(current_batch))
-                if valid_channels:
-                    categorized_channels[current_category or "其他频道"].update(valid_channels)
+                if CONFIG['ENABLE_TEST']:
+                    print(f"\nProcessing {len(current_batch)} channels in {current_category or 'uncategorized'}...")
+                    valid_channels = asyncio.run(process_channel_batch_async(
+                        current_batch,
+                        max_concurrent=CONFIG['MAX_CONCURRENT']
+                    ))
+                    if valid_channels:
+                        categorized_channels[current_category or "其他频道"].update(valid_channels)
+                else:
+                    # 不测试时直接添加所有频道
+                    categorized_channels[current_category or "其他频道"].update(current_batch)
             
         except Exception as e:
             print(f"Error fetching {url}: {e}")
@@ -468,7 +511,7 @@ def fetch_and_merge():
     category_order.extend([
         "港澳台频道",
         "体育频道",
-        "影视频道",
+        "��视频道",
         "少儿频道",
         "新闻频道",
         "其他频道"
@@ -489,6 +532,9 @@ def fetch_and_merge():
 
 if __name__ == "__main__":
     start_time = time.time()
+    
+    # 运行主程序
     fetch_and_merge()
+    
     end_time = time.time()
     print(f"\nTotal processing time: {end_time - start_time:.2f} seconds")
