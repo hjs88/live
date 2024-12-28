@@ -20,7 +20,7 @@ PROVINCES = [
 
 # 全局配置
 CONFIG = {
-    'ENABLE_TEST': False ,  # 设置为 True 开启测试，False 关闭测试
+    'ENABLE_TEST': True ,  # 设置为 True 开启测试，False 关闭测试
     'TIMEOUT': 3,  # 测试超时时间(秒)
     'MAX_CONCURRENT': 50,  # 最大并发数
     'BATCH_SIZE': 200,  # 批处理大小
@@ -592,6 +592,9 @@ def fetch_and_merge():
         "https://iptv.b2og.com/txt/fmml_ipv6.txt",
         "https://iptv.b2og.com/fmml_ipv6.m3u",
         "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
+        "https://ghgo.xyz/raw.githubusercontent.com/yuanzl77/IPTV/master/live.txt",
+        "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
+        "https://ghgo.xyz/raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt",
         "https://iptv.b2og.com/txt/ycl_iptv.txt",
         "https://iptv.b2og.com/txt/j_home.txt",
         "http://xhztv.top/xhz/live.txt",
