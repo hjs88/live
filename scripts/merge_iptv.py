@@ -9,6 +9,10 @@ import asyncio
 import aiohttp
 from tqdm import tqdm
 import argparse
+import socket
+import ipaddress
+import warnings
+from urllib3.exceptions import InsecureRequestWarning
 
 # 在文件顶部定义provinces列表
 PROVINCES = [
@@ -20,8 +24,8 @@ PROVINCES = [
 
 # 全局配置
 CONFIG = {
-    'ENABLE_TEST': False ,  # 设置为 True 开启测试，False 关闭测试
-    'TIMEOUT': 3,  # 测试超时时间(秒)
+    'ENABLE_TEST': True ,  # 设置为 True 开启测试，False 关闭测试
+    'TIMEOUT': 5,  # 测试超时时间(秒)
     'MAX_CONCURRENT': 50,  # 最大并发数
     'BATCH_SIZE': 200,  # 批处理大小
     'MAX_RETRIES': 1  # 最大重试次数
@@ -52,6 +56,12 @@ def standardize_channel_name(channel_line):
     
     channel_name, url = parts
     
+    # 检查是否是IPv6地址
+    parsed = urlparse(url)
+    host = parsed.hostname
+    if host and is_ipv6_address(host) and not is_ipv6_supported():
+        return None  # 如果系统不支持IPv6，跳过该频道
+    
     # 跳过没有名称的频道
     if not channel_name.strip() or channel_name.strip().startswith('http'):
         return None
@@ -69,25 +79,26 @@ def standardize_channel_name(channel_line):
     cctv_match = re.match(cctv_pattern, channel_name, re.IGNORECASE)
     if cctv_match:
         channel_num = cctv_match.group(1)
-        # CCTV频道名称对应表
+        # CCTV频道名称对应表（按频道号排序）
         cctv_names = {
-            '1': 'CCTV-1_综合',
-            '2': 'CCTV-2_财经',
-            '3': 'CCTV-3_综艺',
-            '4': 'CCTV-4_中文国际',
-            '5': 'CCTV-5_体育',
-            '6': 'CCTV-6_电影',
-            '7': 'CCTV-7_国防军事',
-            '8': 'CCTV-8_电视剧',
-            '9': 'CCTV-9_纪录',
-            '10': 'CCTV-10_科教',
-            '11': 'CCTV-11_戏曲',
-            '12': 'CCTV-12_社会与法',
-            '13': 'CCTV-13_新闻',
-            '14': 'CCTV-14_少儿',
-            '15': 'CCTV-15_音乐',
-            '16': 'CCTV-16_奥林匹克',
-            '17': 'CCTV-17_农业农村'
+            '1': 'CCTV-1综合',
+            '2': 'CCTV-2财经',
+            '3': 'CCTV-3综艺',
+            '4': 'CCTV-4中文国际',
+            '5': 'CCTV-5体育',
+            '5+': 'CCTV-5+体育赛事',
+            '6': 'CCTV-6电影',
+            '7': 'CCTV-7国防军事',
+            '8': 'CCTV-8电视剧',
+            '9': 'CCTV-9纪录',
+            '10': 'CCTV-10科教',
+            '11': 'CCTV-11戏曲',
+            '12': 'CCTV-12社会与法',
+            '13': 'CCTV-13新闻',
+            '14': 'CCTV-14少儿',
+            '15': 'CCTV-15音乐',
+            '16': 'CCTV-16奥林匹克',
+            '17': 'CCTV-17农业农村'
         }
         channel_name = cctv_names.get(channel_num, f'CCTV-{channel_num}')
     
@@ -112,7 +123,7 @@ def categorize_channel(line):
     
     channel_name = parts[0]
     
-    # 跳过含乱码的分类名��
+    # 跳过含乱码的分类名
     if not is_valid_chinese_text(channel_name):
         return "其他频道", standardized_channel
     
@@ -361,11 +372,24 @@ def parse_m3u(content):
             
     return '\n'.join(channels)
 
-async def async_check_url(url, timeout=None, max_retries=None):
+def is_ipv6_address(host):
+    """检查是否是IPv6地址"""
+    try:
+        addr = ipaddress.ip_address(host)
+        return addr.version == 6
+    except ValueError:
+        return False
+
+def is_ipv6_supported():
+    """检查系统是否支持IPv6"""
+    try:
+        socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        return True
+    except socket.error:
+        return False
+
+async def async_check_url(url, timeout=3, max_retries=1):
     """异步检查URL是否有效"""
-    timeout = timeout or CONFIG['TIMEOUT']
-    max_retries = max_retries or CONFIG['MAX_RETRIES']
-    
     for retry in range(max_retries + 1):
         try:
             # 基本URL格式检查
@@ -377,29 +401,43 @@ async def async_check_url(url, timeout=None, max_retries=None):
             if parsed.scheme not in ['http', 'https', 'rtmp', 'rtsp']:
                 return False
                 
-            # 对于m3u8文件，只检查文件头
-            if url.endswith('.m3u8'):
-                connector = aiohttp.TCPConnector(force_close=True, limit=0, verify_ssl=False)
-                async with aiohttp.ClientSession(connector=connector) as session:
-                    try:
-                        headers = {
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                            'Range': 'bytes=0-1024'  # 只请求前1KB
-                        }
-                        async with session.get(url, timeout=timeout, headers=headers) as response:
-                            if response.status == 1200:
-                                content = await response.content.read(1024)
-                                return b'#EXTM3U' in content
-                    except:
-                        pass
+            # 检查是否是IPv6地址
+            host = parsed.hostname
+            is_ipv6 = is_ipv6_address(host) if host else False
+            
+            # 如果是IPv6地址但系统不支持IPv6，则跳过
+            if is_ipv6 and not is_ipv6_supported():
+                print(f"跳过IPv6地址 {url} (系统不支持IPv6)")
                 return False
                 
-            # 对于其他流媒体链接，使用HEAD请求
-            connector = aiohttp.TCPConnector(force_close=True, limit=0, verify_ssl=False)
+            connector = aiohttp.TCPConnector(
+                force_close=True,
+                enable_cleanup_closed=True,
+                limit=0,
+                ssl=False  # 使用 ssl=False 替代 verify_ssl
+            )
+            
             async with aiohttp.ClientSession(connector=connector) as session:
                 try:
-                    headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'}
-                    async with session.head(url, timeout=timeout, headers=headers) as response:
+                    timeout_obj = aiohttp.ClientTimeout(
+                        total=timeout,
+                        connect=2,
+                        sock_connect=2,
+                        sock_read=timeout
+                    )
+                    
+                    headers = {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Accept': '*/*',
+                        'Connection': 'keep-alive'
+                    }
+                    
+                    async with session.get(
+                        url,
+                        timeout=timeout_obj,
+                        headers=headers,
+                        allow_redirects=True
+                    ) as response:
                         if response.status == 200:
                             content_type = response.headers.get('Content-Type', '').lower()
                             return any(t in content_type for t in [
@@ -416,7 +454,7 @@ async def async_check_url(url, timeout=None, max_retries=None):
         except Exception as e:
             if retry == max_retries:
                 return False
-            await asyncio.sleep(0.5)  # 减少重试等待时间
+            await asyncio.sleep(0.5)
             continue
     return False
 
@@ -584,91 +622,110 @@ def reclassify_other_channels(categorized_channels):
         if not matched and province is None:
             categorized_channels["其他频道"].add(channel)
 
+def fetch_url_with_retry(url, max_retries=3, timeout=10):
+    """获取URL内容，带重试机制"""
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': '*/*',
+        'Connection': 'keep-alive'
+    }
+    
+    # 处理代理设置
+    proxies = None
+    if url.startswith('https://ghgo.xyz') or url.startswith('https://iptv.b2og.com'):
+        # 对特定域名使用代理
+        proxies = {
+            'http': None,  # 不使用 HTTP 代理
+            'https': None  # 不使用 HTTPS 代理
+        }
+    
+    for i in range(max_retries):
+        try:
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=timeout,
+                proxies=proxies,
+                verify=False  # 禁用SSL验证
+            )
+            
+            if response.status_code == 200:
+                return response.text
+            elif response.status_code == 404:
+                print(f"资源不存在 (404): {url}")
+                return None
+            else:
+                print(f"HTTP错误 {response.status_code}: {url}")
+                
+        except requests.exceptions.SSLError:
+            print(f"SSL错误，尝试不验证证书: {url}")
+            try:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout,
+                    verify=False,
+                    proxies=proxies
+                )
+                if response.status_code == 200:
+                    return response.text
+            except Exception as e:
+                print(f"重试 {i+1}/{max_retries} 获取 {url} 失败: {str(e)}")
+                
+        except requests.exceptions.ReadTimeout:
+            print(f"读取超时，尝试增加超时时间: {url}")
+            try:
+                response = requests.get(
+                    url,
+                    headers=headers,
+                    timeout=timeout * 2,  # 增加超时时间
+                    verify=False,
+                    proxies=proxies
+                )
+                if response.status_code == 200:
+                    return response.text
+            except Exception as e:
+                print(f"重试 {i+1}/{max_retries} 获取 {url} 失败: {str(e)}")
+                
+        except requests.exceptions.ConnectionError:
+            print(f"连接错误: {url}")
+        except requests.exceptions.RequestException as e:
+            print(f"请求错误: {url} - {str(e)}")
+            
+        if i < max_retries - 1:
+            wait_time = 2 ** i  # 指数退避
+            print(f"等待 {wait_time} 秒后重试...")
+            time.sleep(wait_time)
+            
+    return None
+
 def fetch_and_merge():
-    """获取并合并播源"""
-    # 更新URL列表，只保留可靠的源
+    """获取并合并直播源"""
+    # 更新URL列表，移除不可靠的源
     urls = [
-        # GitHub直链
+        # 可靠的源
         "https://iptv.b2og.com/txt/fmml_ipv6.txt",
-        #"https://iptv.b2og.com/fmml_ipv6.m3u",
+        "https://iptv.b2og.com/fmml_ipv6.m3u",
         "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
         "https://ghgo.xyz/raw.githubusercontent.com/yuanzl77/IPTV/master/live.txt",
         "http://wx.thego.cn/mh.txt",
-       # "https://ghgo.xyz/raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt",
-        #"https://iptv.b2og.com/txt/ycl_iptv.txt",
-        #"https://iptv.b2og.com/txt/j_home.txt",
-        #"http://xhztv.top/xhz/live.txt",
-        # "http://live.kilvn.com/iptv.m3u",
+        "https://ghgo.xyz/raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt",
+        "https://iptv.b2og.com/txt/ycl_iptv.txt",
+        "https://iptv.b2og.com/txt/j_home.txt",
+        "http://xhztv.top/xhz/live.txt",
+        "http://live.kilvn.com/iptv.m3u",
+        "https://raw.githubusercontent.com/kimwang1978/collect-tv-txt/87b72fdfc629f3907ce5b407f4fa21f49ec6f06e/live_lite.txt",
+        "https://raw.githubusercontent.com/vbskycn/iptv/15129a4fcb31a6855d2dd3f43936399726383784/tv/hd.txt",
 
     ]
     
-    # 添加代理支持
-    proxies = {
-        # 如果需要代理，取消注释下面的行并填入代理地址
-        # 'http': 'http://127.0.0.1:7890',
-        # 'https': 'http://127.0.0.1:7890'
-    }
+    # 禁用 SSL 警告
+    warnings.filterwarnings('ignore', category=InsecureRequestWarning)
     
-    # 改进的重试机制
-    def fetch_url_with_retry(url, max_retries=3, base_timeout=10):
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': '*/*',
-            'Connection': 'keep-alive'
-        }
-        
-        for i in range(max_retries):
-            try:
-                # 随着重试次数增加超时时间
-                timeout = base_timeout * (i + 1)
-                response = requests.get(
-                    url,
-                    timeout=timeout,
-                    headers=headers,
-                    proxies=proxies,
-                    verify=True  # 验证SSL证书
-                )
-                
-                if response.status_code == 200:
-                    return response.text
-                elif response.status_code == 403:
-                    print(f"访问被拒绝 (403): {url}")
-                    break  # 不再重试
-                elif response.status_code == 404:
-                    print(f"资源不存在 (404): {url}")
-                    break  # 不再重试
-                    
-            except requests.exceptions.SSLError:
-                print(f"SSL错误: {url}")
-                # 尝试不验证SSL证书
-                try:
-                    response = requests.get(
-                        url,
-                        timeout=timeout,
-                        headers=headers,
-                        proxies=proxies,
-                        verify=False
-                    )
-                    if response.status_code == 200:
-                        return response.text
-                except Exception as e:
-                    print(f"重试 {i+1}/{max_retries} 获取 {url} 失败: {str(e)}")
-                    
-            except requests.exceptions.RequestException as e:
-                print(f"重试 {i+1}/{max_retries} 获取 {url} 失败: {str(e)}")
-                if i < max_retries - 1:
-                    # 使用指数退避
-                    wait_time = 2 ** i
-                    print(f"等待 {wait_time} 秒后重试...")
-                    time.sleep(wait_time)
-                continue
-                
-        return None
-
-    # 使用defaultdict来存储不同分类的频道
+    # 使用 defaultdict 存储不同分类的频道
     categorized_channels = defaultdict(set)
     
-    # 添加URL缓存
+    # 添加 URL 缓存
     url_cache = {}
     
     for url in urls:
@@ -677,16 +734,13 @@ def fetch_and_merge():
                 content = url_cache[url]
             else:
                 print(f"\n获取 {url}...")
-                response = requests.get(url, timeout=5, headers={
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-                }, verify=False)
-                
-                if response.status_code == 200:
-                    content = response.text
+                content = fetch_url_with_retry(url)
+                if content:
                     if url.endswith('.m3u') or url.endswith('.m3u8') or '#EXTM3U' in content:
                         content = parse_m3u(content)
                     url_cache[url] = content
                 else:
+                    print(f"无法获取内容: {url}")
                     continue
                     
             lines = content.splitlines()
@@ -767,7 +821,7 @@ def fetch_and_merge():
     category_order = [
         "央视频道",
         "卫视频道",
-
+        "广东频道"
     ]
     # 添加所有省份频道
     category_order.extend([f"{province}频道" for province in PROVINCES])
@@ -788,9 +842,35 @@ def fetch_and_merge():
             if category in categorized_channels:
                 # 写入分类标题
                 file.write(f"{category},#genre#\n")
-                # 写入该分类下的所有频道
-                for channel in sorted(categorized_channels[category]):
-                    file.write(channel + "\n")
+                
+                # 对CCTV频道进行特殊排序
+                if category == "央视频道":
+                    # 提取CCTV频道并排序
+                    cctv_channels = []
+                    other_channels = []
+                    for channel in categorized_channels[category]:
+                        if channel.startswith('CCTV-'):
+                            # 提取频道号用于排序
+                            match = re.match(r'CCTV-(\d+)', channel)
+                            if match:
+                                num = int(match.group(1))
+                                cctv_channels.append((num, channel))
+                        else:
+                            other_channels.append(channel)
+                    
+                    # 按频道号排序CCTV频道
+                    cctv_channels.sort()
+                    # 写入排序后的CCTV频道
+                    for _, channel in cctv_channels:
+                        file.write(channel + "\n")
+                    # 写入其他央视频道
+                    for channel in sorted(other_channels):
+                        file.write(channel + "\n")
+                else:
+                    # 其他分类正常排序
+                    for channel in sorted(categorized_channels[category]):
+                        file.write(channel + "\n")
+                        
                 # 添加空行分隔不同分类
                 file.write("\n")
 
