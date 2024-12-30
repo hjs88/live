@@ -56,18 +56,12 @@ def standardize_channel_name(channel_line):
     
     channel_name, url = parts
     
-    # 检查是否是IPv6地址
-    parsed = urlparse(url)
-    host = parsed.hostname
-    if host and is_ipv6_address(host) and not is_ipv6_supported():
-        return None  # 如果系统不支持IPv6，跳过该频道
-    
     # 跳过没有名称的频道
     if not channel_name.strip() or channel_name.strip().startswith('http'):
         return None
         
     # 跳过纯数字或者太短的名称
-    if channel_name.strip().isdigit() or len(channel_name.strip()) < 2:
+    if len(channel_name.strip()) < 1:
         return None
         
     # 跳过包含乱码的频道名称
@@ -75,39 +69,43 @@ def standardize_channel_name(channel_line):
         return None
     
     # 标准化CCTV频道名称
-    cctv_pattern = r'CCTV-?(\d+).*'
-    cctv_match = re.match(cctv_pattern, channel_name, re.IGNORECASE)
-    if cctv_match:
-        channel_num = cctv_match.group(1)
-        # CCTV频道名称对应表（按频道号排序）
-        cctv_names = {
-            '1': 'CCTV-1综合',
-            '2': 'CCTV-2财经',
-            '3': 'CCTV-3综艺',
-            '4': 'CCTV-4中文国际',
-            '5': 'CCTV-5体育',
-            '5+': 'CCTV-5+体育赛事',
-            '6': 'CCTV-6电影',
-            '7': 'CCTV-7国防军事',
-            '8': 'CCTV-8电视剧',
-            '9': 'CCTV-9纪录',
-            '10': 'CCTV-10科教',
-            '11': 'CCTV-11戏曲',
-            '12': 'CCTV-12社会与法',
-            '13': 'CCTV-13新闻',
-            '14': 'CCTV-14少儿',
-            '15': 'CCTV-15音乐',
-            '16': 'CCTV-16奥林匹克',
-            '17': 'CCTV-17农业农村'
-        }
-        channel_name = cctv_names.get(channel_num, f'CCTV-{channel_num}')
+    cctv_patterns = [
+        r'(?:CCTV|央视)?[-\s]*?(\d+)(?:\+)?(?:\s*[频道高清超清]+)?',  # 匹配 CCTV-1, 1频道, CCTV1等
+        r'CCTV[-\s]*(\d+)[-\s]*\+?'  # 匹配 CCTV-5+
+    ]
     
-    # 标准化卫视频道名称
-    satellite_pattern = r'(.+)卫视.*'
-    satellite_match = re.match(satellite_pattern, channel_name)
-    if satellite_match:
-        province = satellite_match.group(1)
-        channel_name = f'{province}卫视'
+    for pattern in cctv_patterns:
+        cctv_match = re.match(pattern, channel_name, re.IGNORECASE)
+        if cctv_match:
+            channel_num = cctv_match.group(1)
+            # CCTV频道名称对应表（按频道号排序）
+            cctv_names = {
+                '1': 'CCTV-1综合',
+                '2': 'CCTV-2财经',
+                '3': 'CCTV-3综艺',
+                '4': 'CCTV-4中文国际',
+                '5': 'CCTV-5体育',
+                '5+': 'CCTV-5+体育赛事',
+                '6': 'CCTV-6电影',
+                '7': 'CCTV-7国防军事',
+                '8': 'CCTV-8电视剧',
+                '9': 'CCTV-9纪录',
+                '10': 'CCTV-10科教',
+                '11': 'CCTV-11戏曲',
+                '12': 'CCTV-12社会与法',
+                '13': 'CCTV-13新闻',
+                '14': 'CCTV-14少儿',
+                '15': 'CCTV-15音乐',
+                '16': 'CCTV-16奥林匹克',
+                '17': 'CCTV-17农业农村'
+            }
+            
+            # 特殊处理CCTV-5+
+            if '+' in channel_name and channel_num == '5':
+                channel_num = '5+'
+                
+            channel_name = cctv_names.get(channel_num, f'CCTV-{channel_num}')
+            break
     
     return f"{channel_name},{url}"
 
@@ -123,124 +121,14 @@ def categorize_channel(line):
     
     channel_name = parts[0]
     
-    # 跳过含乱码的分类名
+    # 跳过包含乱码的分类名称
     if not is_valid_chinese_text(channel_name):
         return "其他频道", standardized_channel
     
-    # 省份和城市频道分类规则
-    province_channels = {
-        "广东频道": {
-            "cities": [
-                "广东", "广州", "深圳", "珠海", "汕头", "佛山", "韶关", "湛江", "肇庆", 
-                "江门", "茂名", "惠州", "梅州", "汕尾", "河源", "阳江", "清远", "东莞", 
-                "中山", "潮州", "揭阳", "云浮"
-            ],
-            "keywords": [
-                "南方", "珠江", "广东新闻", "广东公共", "广东体育", "广东经济", "广东影视",
-                "文旅", "综合", "经济", "新闻", "公共", "生活", "都市", "影视", "少儿",
-                "台", "电视", "频道", "高清", "HD", "测试","汕头经济","汕头文旅","汕头综合"
-            ]
-        },
-        "浙江频道": {
-            "cities": [
-                "浙江", "杭州", "宁波", "温州", "嘉兴", "湖州", "绍兴", "金华", "衢州", 
-                "舟山", "台州", "丽水"
-            ],
-            "keywords": [
-                "钱江", "浙江卫视", "浙江经视", "浙江新闻", "浙江少儿", "浙江教科", "浙江影视",
-                "文旅", "综合", "经济", "新闻", "公共", "生活", "都市", "影视", "少儿",
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "北京频道": {
-            "cities": [
-                "北京", "BTV", "北京卫视", "北京新闻", "北京影视", "北京文艺", "北京体育", "北京生活",
-                "北京科教", "北京财经", "北京青年", "北京纪实", "卡酷少儿"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "上海频道": {
-            "cities": [
-                "上海", "东方", "STV", "上海卫视", "上海都市", "上海新闻", "上海教育", "上海纪实",
-                "上海外语", "上海财经", "上海娱乐", "上海电视剧", "五星体育", "第一财经"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "江苏频道": {
-            "cities": [
-                "江苏", "南京", "苏州", "无锡", "常州", "镇江", "南通", "扬州", "盐城", "徐州", "淮安", "连云港",
-                "泰州", "宿迁", "江苏卫视", "江苏城市", "江苏综艺", "江苏影视", "江苏教育", "江苏体育"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "湖南频道": {
-            "cities": [
-                "湖南", "长沙", "株洲", "湘潭", "衡阳", "邵阳", "岳阳", "常德", "张家界", "益阳", "郴州",
-                "永州", "怀化", "娄底", "湘西", "湖南卫视", "湖南经视", "湖南都市", "湖南电视剧", "金鹰"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "四川频道": {
-            "cities": [
-                "四川", "成都", "自贡", "攀枝花", "泸州", "德阳", "绵阳", "广元", "遂宁", "内江", "乐山",
-                "南充", "眉山", "宜宾", "广安", "达州", "雅安", "巴中", "资阳", "阿坝", "甘孜", "凉山",
-                "四川卫视", "四川新闻", "四川经济", "四川文化", "四川影视", "四川科教"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "河南频道": {
-            "cities": [
-                "河南", "郑州", "开封", "洛阳", "平顶山", "安阳", "鹤壁", "新乡", "焦作", "濮阳", "许昌",
-                "漯河", "三门峡", "南阳", "商丘", "信阳", "周口", "驻马店", "济源",
-                "河南卫视", "河南都市", "河南民生", "河南新闻", "河南电视剧"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "河北频道": {
-            "cities": [
-                "河北", "石家庄", "唐山", "秦皇岛", "邯郸", "邢台", "保定", "张家口", "承德", "沧州", "廊坊",
-                "衡水", "河北卫视", "河北经济", "河北都市", "河北影视", "河北少儿"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "山东频道": {
-            "cities": [
-                "山东", "济南", "青岛", "淄博", "枣庄", "东营", "烟台", "潍坊", "��宁", "泰安", "威海",
-                "日照", "临沂", "德州", "聊城", "滨州", "菏泽", "山东卫视", "山东新闻", "山东综艺"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        },
-        "安徽频道": {
-            "cities": [
-                "安徽", "合肥", "芜湖", "蚌埠", "淮南", "马鞍山", "淮北", "铜陵", "安庆", "黄山", "滁州",
-                "阜阳", "宿州", "六安", "亳州", "池州", "宣城", "安徽卫视", "安徽经视", "安徽影视"
-            ],
-            "keywords": [
-                "台", "电视", "频道", "高清", "HD", "测试"
-            ]
-        }
-    }
-    
-    # 先检查是否是央视频道（优先级最高）
+    # 检查是否是央视频道
     if any(keyword in channel_name for keyword in [
-        "CCTV", "央视", "中央电视台", "CETV", "CGTN", "中国教育", "央广","中国教育"
-    ]):
+        "CCTV", "央视", "中央电视台", "CETV", "CGTN", "中国教育", "央广"
+    ]) or channel_name.isdigit() or re.match(r'^\d+[频道高清超清]+$', channel_name):
         return "央视频道", standardized_channel
     
     # 然后检查是否是卫视频道（注意排除省内卫视）
@@ -699,6 +587,58 @@ def fetch_url_with_retry(url, max_retries=3, timeout=10):
             
     return None
 
+def sort_channels_by_quality(channels):
+    """根据直播源质量对频道进行排序"""
+    def get_channel_score(channel):
+        """计算频道源的质量分数"""
+        _, url = channel.split(',', 1)
+        score = 0
+        
+        # 优先考虑稳定的域名
+        stable_domains = [
+            'cctv.com', 'cctvplus.com',        # CCTV官方
+            'cdn.jsdelivr.net',                 # CDN源
+            'liveplay-kk.rtxapp.com',          # 快手源
+            'live.cgtn.com',                   # CGTN官方
+            'newcctv.cn',                      # 新CCTV源
+            'tvos.cn',                         # 电视源
+            'cmvideo.cn',                      # 移动源
+            'nbs.cn',                          # 网络广播
+            'cntv.cn',                         # CNTV源
+            'ipv6.tv',                         # IPv6源
+        ]
+        
+        for domain in stable_domains:
+            if domain in url:
+                score += 100
+                break
+        
+        # 根据协议评分
+        if 'https://' in url:
+            score += 20  # HTTPS更安全
+        elif 'http://' in url:
+            score += 10
+        
+        # 根据清晰度评分
+        if 'hd' in url.lower() or '高清' in url:
+            score += 15
+        if '4k' in url.lower():
+            score += 20
+            
+        # 根据线路类型评分
+        if 'ipv6' in url.lower():
+            score += 5  # IPv6可能更快
+        if 'cdn' in url.lower():
+            score += 10  # CDN通常更稳定
+            
+        # 根据URL长度评分（通常越短越稳定）
+        score -= len(url) * 0.01
+        
+        return score
+    
+    # 对频道列表进行排序
+    return sorted(channels, key=get_channel_score, reverse=True)
+
 def fetch_and_merge():
     """获取并合并直播源"""
     # 更新URL列表，移除不可靠的源
@@ -840,7 +780,7 @@ def fetch_and_merge():
     output_file = os.path.join(output_dir, "merged_file.txt")
     with open(output_file, "w", encoding='utf-8') as file:
         for category in category_order:
-            if category in categorized_channels:
+            if category in categorized_channels and categorized_channels[category]:
                 # 写入分类标题
                 file.write(f"{category},#genre#\n")
                 
@@ -849,29 +789,53 @@ def fetch_and_merge():
                     # 提取CCTV频道并排序
                     cctv_channels = []
                     other_channels = []
+                    
                     for channel in categorized_channels[category]:
-                        if channel.startswith('CCTV-'):
+                        if 'CCTV-' in channel:
                             # 提取频道号用于排序
                             match = re.match(r'CCTV-(\d+)', channel)
                             if match:
                                 num = int(match.group(1))
                                 cctv_channels.append((num, channel))
+                            elif 'CCTV-5+' in channel:
+                                cctv_channels.append((5.5, channel))
                         else:
                             other_channels.append(channel)
                     
                     # 按频道号排序CCTV频道
                     cctv_channels.sort()
-                    # 写入排序后的CCTV频道
+                    
+                    # 对每个CCTV频道的不同源进行质量排序
+                    current_channel = None
+                    channel_sources = []
+                    
                     for _, channel in cctv_channels:
-                        file.write(channel + "\n")
-                    # 写入其他央视频道
-                    for channel in sorted(other_channels):
-                        file.write(channel + "\n")
+                        channel_name = channel.split(',')[0]
+                        if channel_name != current_channel:
+                            # 写入前一个频道的已排序源
+                            if channel_sources:
+                                for sorted_channel in sort_channels_by_quality(channel_sources):
+                                    file.write(sorted_channel + "\n")
+                                channel_sources = []
+                            current_channel = channel_name
+                        channel_sources.append(channel)
+                    
+                    # 写入最后一个频道的源
+                    if channel_sources:
+                        for sorted_channel in sort_channels_by_quality(channel_sources):
+                            file.write(sorted_channel + "\n")
+                    
+                    # 写入其他央视频道（也按质量排序）
+                    if other_channels:
+                        for channel in sort_channels_by_quality(other_channels):
+                            file.write(channel + "\n")
+                            
                 else:
-                    # 其他分类正常排序
-                    for channel in sorted(categorized_channels[category]):
+                    # 其他分类按质量排序
+                    sorted_channels = sort_channels_by_quality(categorized_channels[category])
+                    for channel in sorted_channels:
                         file.write(channel + "\n")
-                        
+                
                 # 添加空行分隔不同分类
                 file.write("\n")
 
