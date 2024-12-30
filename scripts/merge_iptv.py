@@ -590,15 +590,15 @@ def fetch_and_merge():
     urls = [
         # GitHub直链
         "https://iptv.b2og.com/txt/fmml_ipv6.txt",
-        "https://iptv.b2og.com/fmml_ipv6.m3u",
-        "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
-        "https://ghgo.xyz/raw.githubusercontent.com/yuanzl77/IPTV/master/live.txt",
-        "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
-        "https://ghgo.xyz/raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt",
-        "https://iptv.b2og.com/txt/ycl_iptv.txt",
-        "https://iptv.b2og.com/txt/j_home.txt",
-        "http://xhztv.top/xhz/live.txt",
-        "http://live.kilvn.com/iptv.m3u",
+        #"https://iptv.b2og.com/fmml_ipv6.m3u",
+       # "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
+        #"https://ghgo.xyz/raw.githubusercontent.com/yuanzl77/IPTV/master/live.txt",
+        #"https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
+       # "https://ghgo.xyz/raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt",
+        #"https://iptv.b2og.com/txt/ycl_iptv.txt",
+        #"https://iptv.b2og.com/txt/j_home.txt",
+        #"http://xhztv.top/xhz/live.txt",
+        # "http://live.kilvn.com/iptv.m3u",
 
     ]
     
