@@ -20,7 +20,7 @@ PROVINCES = [
 
 # 全局配置
 CONFIG = {
-    'ENABLE_TEST': True ,  # 设置为 True 开启测试，False 关闭测试
+    'ENABLE_TEST': False ,  # 设置为 True 开启测试，False 关闭测试
     'TIMEOUT': 3,  # 测试超时时间(秒)
     'MAX_CONCURRENT': 50,  # 最大并发数
     'BATCH_SIZE': 200,  # 批处理大小
