@@ -591,7 +591,7 @@ def fetch_and_merge():
         # GitHub直链
         "https://iptv.b2og.com/txt/fmml_ipv6.txt",
         #"https://iptv.b2og.com/fmml_ipv6.m3u",
-       # "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
+        "https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
         #"https://ghgo.xyz/raw.githubusercontent.com/yuanzl77/IPTV/master/live.txt",
         #"https://ghgo.xyz/raw.githubusercontent.com/Guovin/iptv-api/gd/output/result.txt",
        # "https://ghgo.xyz/raw.githubusercontent.com/vbskycn/iptv/master/tv/hd.txt",
