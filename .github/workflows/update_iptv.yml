@@ -2,7 +2,7 @@ name: Update IPTV List
 
 on:
   schedule:
-    - cron: '0 */6 * * *'  # 每6小时运行一次
+    - cron: '0 3 * * *'  # 每天凌晨3点运行
   workflow_dispatch:  # 允许手动触发
 
 permissions:
