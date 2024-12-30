@@ -602,16 +602,16 @@ def fetch_and_merge():
                     continue
             
             # 处理每个频道
-            for line in content.splitlines():  # 使用 splitlines() 替代 split('\n')
+            for line in content.split('\n'):
                 if line.strip():
-                    # 检查是否包含CCTV-1或CCTV-2
-                    if 'CCTV-1' in line or 'CCTV-2' in line or 'CCTV1' in line or 'CCTV2' in line:
-                        print(f"发现CCTV1/2频道: {line}")
-                    
+                    # 跳过分类标题行
+                    if line.endswith(',#genre#'):
+                        continue
+                        
                     category, channel = categorize_channel(line)
                     if category and channel:
                         categorized_channels[category].add(channel)
-                        
+            
             # 显示分类结果
             print("\n当前分类结果:")
             for category, channels in categorized_channels.items():
@@ -670,53 +670,55 @@ def write_channels_to_file(output_file, categorized_channels):
             "其他频道"
         ]
         
-        # 记录已写入的分类
-        written_categories = set()
+        # 合并相同分类的频道
+        merged_channels = defaultdict(set)
+        for category, channels in categorized_channels.items():
+            # 移除重复的分类标题行
+            channels = {ch for ch in channels if not ch.endswith(',#genre#')}
+            merged_channels[category].update(channels)
         
+        # 按顺序写入分类
         for category in category_order:
-            if category in categorized_channels and categorized_channels[category]:
-                # 避免重复写入分类
-                if category not in written_categories:
-                    # 写入分类标题
-                    file.write(f"{category},#genre#\n")
-                    written_categories.add(category)
+            if category in merged_channels and merged_channels[category]:
+                # 写入分类标题
+                file.write(f"{category},#genre#\n")
+                
+                # 对频道进行排序
+                sorted_channels = sorted(merged_channels[category], 
+                                      key=lambda x: lazy_pinyin(x.split(',')[0])[0])
+                
+                # 特殊处理央视频道
+                if category == "央视频道":
+                    cctv_channels = []
+                    other_channels = []
                     
-                    # 对频道进行排序
-                    sorted_channels = sorted(categorized_channels[category], 
-                                          key=lambda x: lazy_pinyin(x.split(',')[0])[0])
+                    for channel in sorted_channels:
+                        if 'CCTV-' in channel:
+                            # 提取频道号用于排序
+                            match = re.match(r'CCTV-(\d+)', channel)
+                            if match:
+                                num = int(match.group(1))
+                                cctv_channels.append((num, channel))
+                            elif 'CCTV-5+' in channel:
+                                cctv_channels.append((5.5, channel))
+                        else:
+                            other_channels.append(channel)
                     
-                    # 特殊处理央视频道
-                    if category == "央视频道":
-                        cctv_channels = []
-                        other_channels = []
+                    # 按频道号排序CCTV频道
+                    cctv_channels.sort()
+                    for _, channel in cctv_channels:
+                        file.write(f"{channel}\n")
                         
-                        for channel in sorted_channels:
-                            if 'CCTV-' in channel:
-                                # 提取频道号用于排序
-                                match = re.match(r'CCTV-(\d+)', channel)
-                                if match:
-                                    num = int(match.group(1))
-                                    cctv_channels.append((num, channel))
-                                elif 'CCTV-5+' in channel:
-                                    cctv_channels.append((5.5, channel))
-                            else:
-                                other_channels.append(channel)
-                        
-                        # 按频道号排序CCTV频道
-                        cctv_channels.sort()
-                        for _, channel in cctv_channels:
-                            file.write(channel + "\n")
-                            
-                        # 写入其他央视频道
-                        for channel in sorted(other_channels):
-                            file.write(channel + "\n")
-                    else:
-                        # 其他分类直接写入排序后的频道
-                        for channel in sorted_channels:
-                            file.write(channel + "\n")
-                    
-                    # 添加空行分隔不同分类
-                    file.write("\n")
+                    # 写入其他央视频道
+                    for channel in sorted(other_channels):
+                        file.write(f"{channel}\n")
+                else:
+                    # 其他分类直接写入排序后的频道
+                    for channel in sorted_channels:
+                        file.write(f"{channel}\n")
+                
+                # 添加空行分隔不同分类
+                file.write("\n")
 
 if __name__ == "__main__":
     start_time = time.time()
