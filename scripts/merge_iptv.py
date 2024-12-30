@@ -716,6 +716,7 @@ def fetch_and_merge():
         "http://live.kilvn.com/iptv.m3u",
         "https://raw.githubusercontent.com/kimwang1978/collect-tv-txt/87b72fdfc629f3907ce5b407f4fa21f49ec6f06e/live_lite.txt",
         "https://raw.githubusercontent.com/vbskycn/iptv/15129a4fcb31a6855d2dd3f43936399726383784/tv/hd.txt",
+        "https://raw.githubusercontent.com/CCSH/IPTV/48a47149ea74f7ea93f93a0bcb24a6086825593e/live.txt"
 
     ]
     
