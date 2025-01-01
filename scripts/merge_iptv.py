@@ -49,65 +49,57 @@ def is_valid_chinese_text(text):
     except UnicodeError:
         return False
 
-def standardize_channel_name(channel_line):
-    """标准化频道名称"""
-    parts = channel_line.split(',', 1)
-    if len(parts) != 2:
+def standardize_channel_name(line):
+    """标准化频道名称和URL"""
+    try:
+        # 分割频道名和URL
+        parts = line.split(',', 1)
+        if len(parts) != 2:
+            return None
+            
+        channel_name = parts[0].strip()
+        url = parts[1].strip()
+        
+        # 检查频道名和URL是否为空
+        if not channel_name or not url:
+            return None
+            
+        # 移除URL中的多余参数
+        if '$' in url:
+            url = url.split('$')[0]
+            
+        return f"{channel_name},{url}"
+    except:
         return None
-    
-    channel_name, url = parts
-    original_name = channel_name  # 保存原始名称用于调试
-    
-    # 调试输出
-    print(f"处理频道: {channel_name}")
-    
-    # 标准化CCTV频道名称
-    cctv_patterns = [
-        r'(?:CCTV|央视)?[-\s]*?(\d+)(?:\+)?(?:\s*[频道高清超清]+)?',
-        r'CCTV[-\s]*(\d+)[-\s]*\+?',
-        r'^(\d+)[频道高清超清]+$',
-        r'中央[电视台]*[-\s]*?(\d+)[-\s]*台?'
-    ]
-    
-    for pattern in cctv_patterns:
-        cctv_match = re.match(pattern, channel_name, re.IGNORECASE)
-        if cctv_match:
-            channel_num = cctv_match.group(1)
-            print(f"匹配到CCTV频道号: {channel_num}")  # 调试输出
-            # CCTV频道名称对应表（按频道号排序）
-            cctv_names = {
-                '1': 'CCTV-1综合',
-                '2': 'CCTV-2财经',
-                '3': 'CCTV-3综艺',
-                '4': 'CCTV-4中文国际',
-                '5': 'CCTV-5体育',
-                '5+': 'CCTV-5+体育赛事',
-                '6': 'CCTV-6电影',
-                '7': 'CCTV-7国防军事',
-                '8': 'CCTV-8电视剧',
-                '9': 'CCTV-9纪录',
-                '10': 'CCTV-10科教',
-                '11': 'CCTV-11戏曲',
-                '12': 'CCTV-12社会与法',
-                '13': 'CCTV-13新闻',
-                '14': 'CCTV-14少儿',
-                '15': 'CCTV-15音乐',
-                '16': 'CCTV-16奥林匹克',
-                '17': 'CCTV-17农业农村'
-            }
-            channel_name = cctv_names.get(channel_num, f'CCTV-{channel_num}')
-    
-    # 标准化卫视频道名称
-    satellite_pattern = r'(.+)卫视.*'
-    satellite_match = re.match(satellite_pattern, channel_name)
-    if satellite_match:
-        province = satellite_match.group(1)
-        channel_name = f'{province}卫视'
-    
-    return f"{channel_name},{url}"
+
+def is_valid_channel(channel_line):
+    """检查频道名称是否有效（不含乱码）"""
+    try:
+        # 分割频道名和URL
+        parts = channel_line.split(',', 1)
+        if len(parts) != 2:
+            return False
+            
+        channel_name = parts[0].strip()
+        
+        # 检查是否包含常见乱码特征
+        if '?' in channel_name or 'ã' in channel_name or 'â' in channel_name:
+            return False
+            
+        # 检查是否全是ASCII字符或有效的中文字符
+        for char in channel_name:
+            if not (0x0020 <= ord(char) <= 0x007E or 0x4E00 <= ord(char) <= 0x9FFF):
+                return False
+                
+        return True
+    except:
+        return False
 
 def categorize_channel(line):
     """根据频道名称对频道进行分类"""
+    if not is_valid_channel(line):
+        return None, None
+        
     standardized_channel = standardize_channel_name(line)
     if not standardized_channel:
         return None, None
@@ -128,25 +120,37 @@ def categorize_channel(line):
     if "卫视" in channel_name:
         return "卫视频道", standardized_channel
     
-    # 检查地方频道
-    province_patterns = {
-        "浙江": "浙江频道",
-        "上海": "上海频道",
-        "北京": "北京频道",
-        "广东": "广东频道",
-        "江苏": "江苏频道",
-        "湖南": "湖南频道",
-        "山东": "山东频道",
-        "河南": "河南频道",
-        "河北": "河北频道",
-        "安徽": "安徽频道",
-        "四川": "四川频道",
-        "内蒙": "内蒙频道"
+    # 省份和地级市对应关系
+    province_city_map = {
+        "浙江": ["杭州", "宁波", "温州", "嘉兴", "湖州", "绍兴", "金华", "衢州", "舟山", "台州", "丽水"],
+        "广东": ["广州", "深圳", "珠海", "汕头", "佛山", "韶关", "湛江", "肇庆", "江门", "茂名", "惠州"],
+        "江苏": ["南京", "苏州", "无锡", "常州", "南通", "扬州", "镇江", "泰州", "盐城", "连云港", "徐州"],
+        "四川": ["成都", "绵阳", "德阳", "遂宁", "乐山", "南充", "宜宾", "自贡", "泸州", "达州", "内江"],
+        "山东": ["济南", "青岛", "淄博", "枣庄", "东营", "烟台", "潍坊", "济宁", "泰安", "威海", "日照"],
+        "河南": ["郑州", "开封", "洛阳", "平顶山", "安阳", "鹤壁", "新乡", "焦作", "濮阳", "许昌", "漯河"],
+        "河北": ["石家庄", "唐山", "秦皇岛", "邯郸", "邢台", "保定", "张家口", "承德", "沧州", "廊坊", "衡水"],
+        "湖南": ["长沙", "株洲", "湘潭", "衡阳", "邵阳", "岳阳", "常德", "张家界", "益阳", "郴州", "永州"],
+        "安徽": ["合肥", "芜湖", "蚌埠", "淮南", "马鞍山", "淮北", "铜陵", "安庆", "黄山", "滁州", "阜阳"],
+        "福建": ["福州", "厦门", "莆田", "三明", "泉州", "漳州", "南平", "龙岩", "宁德"],
+        "江西": ["南昌", "景德镇", "萍乡", "九江", "新余", "鹰潭", "赣州", "吉安", "宜春", "抚州", "上饶"],
+        "云南": ["昆明", "曲靖", "玉溪", "保山", "昭通", "丽江", "普洱", "临沧"],
+        "贵州": ["贵阳", "六盘水", "遵义", "安顺", "毕节", "铜仁"],
+        "广西": ["南宁", "柳州", "桂林", "梧州", "北海", "防城港", "钦州", "贵港", "玉林"],
+        "陕西": ["西安", "铜川", "宝鸡", "咸阳", "渭南", "延安", "汉中", "榆林", "安康", "商洛"],
+        "甘肃": ["兰州", "嘉峪关", "金昌", "白银", "天水", "武威", "张掖", "平凉", "酒泉", "庆阳"],
+        "青海": ["西宁", "海东", "海北", "黄南", "海南", "果洛", "玉树", "海西"],
+        "黑龙江": ["哈尔滨", "齐齐哈尔", "鸡西", "鹤岗", "双鸭山", "大庆", "伊春", "佳木斯", "七台河", "牡丹江", "黑河", "绥化"],
+        "吉林": ["长春", "吉林", "四平", "辽源", "通化", "白山", "松原", "白城", "延边"],
+        "辽宁": ["沈阳", "大连", "鞍山", "抚顺", "本溪", "丹东", "锦州", "营口", "阜新", "辽阳", "盘锦", "铁岭"]
     }
     
-    for province, category in province_patterns.items():
+    # 检查省级和地级市频道
+    for province, cities in province_city_map.items():
         if province in channel_name:
-            return category, standardized_channel
+            return f"{province}频道", standardized_channel
+        # 检查地级市，归类到对应省份
+        if any(city in channel_name for city in cities):
+            return f"{province}频道", standardized_channel
     
     # 检查特殊频道类型
     if any(keyword in channel_name for keyword in ["体育", "足球", "篮球", "NBA"]):
@@ -558,10 +562,223 @@ def fetch_url_with_retry(url, max_retries=3, timeout=10):
             
     return None
 
+async def test_channel_url_async(session, url, timeout=3, max_retries=2):
+    """异步测试频道URL是否可用"""
+    for retry in range(max_retries):
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*',
+                'Connection': 'keep-alive'
+            }
+            async with session.head(url, 
+                                  timeout=timeout,
+                                  headers=headers,
+                                  allow_redirects=True,
+                                  ssl=False) as response:
+                # 接受 200-299 的状态码
+                if 200 <= response.status < 300:
+                    return True
+                # 对于直播流，某些服务器可能返回特定状态码
+                if response.status in [302, 303, 307, 308]:
+                    return True
+        except:
+            if retry == max_retries - 1:
+                return False
+            await asyncio.sleep(1)  # 重试前等待
+    return False
+
+async def test_channel_latency(session, url, timeout=3, max_retries=2):
+    """测试频道延迟"""
+    min_latency = float('inf')
+    
+    for retry in range(max_retries):
+        try:
+            start_time = time.time()
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*',
+                'Connection': 'keep-alive'
+            }
+            async with session.head(url, 
+                                  timeout=timeout,
+                                  headers=headers,
+                                  allow_redirects=True,
+                                  ssl=False) as response:
+                if 200 <= response.status < 300 or response.status in [302, 303, 307, 308]:
+                    latency = time.time() - start_time
+                    min_latency = min(min_latency, latency)
+            
+            if min_latency != float('inf'):
+                return min_latency
+                
+        except:
+            continue
+            
+    return min_latency
+
+async def validate_and_sort_channels(categorized_channels, max_test=50, max_concurrent=20):
+    """异步验证频道并按延迟排序"""
+    valid_channels = defaultdict(list)
+    
+    async with aiohttp.ClientSession() as session:
+        for category, channels in categorized_channels.items():
+            print(f"\n测试 {category} 频道...")
+            
+            test_tasks = []
+            tested = 0
+            
+            with tqdm(total=min(len(channels), max_test), desc=f"测试进度") as pbar:
+                for channel in channels:
+                    if tested >= max_test:
+                        break
+                    
+                    try:
+                        name, url = channel.split(',', 1)
+                        url = url.strip()
+                        
+                        # 先测试可用性
+                        is_valid = await test_channel_url_async(session, url)
+                        if is_valid:
+                            # 再测试延迟
+                            latency = await test_channel_latency(session, url)
+                            if latency != float('inf'):
+                                valid_channels[category].append((latency, channel))
+                                print(f"✓ {name} (延迟: {latency:.3f}s)")
+                            else:
+                                # 可用但延迟高的频道也保留
+                                valid_channels[category].append((float('inf'), channel))
+                                print(f"△ {name} (高延迟)")
+                        else:
+                            print(f"✗ {name}")
+                        
+                        pbar.update(1)
+                        tested += 1
+                        
+                    except Exception as e:
+                        print(f"! 测试出错 {name}: {str(e)}")
+                        # 测试出错的频道也保留
+                        valid_channels[category].append((float('inf'), channel))
+                        pbar.update(1)
+                        continue
+            
+            # 按延迟排序，但保留所有频道
+            valid_channels[category].sort(key=lambda x: x[0])
+    
+    # 转换回只包含频道的格式，保留所有频道
+    return {category: [channel for _, channel in channels] 
+            for category, channels in valid_channels.items()}
+
+def write_channels_to_file(output_file, categorized_channels):
+    """将频道写入文件"""
+    try:
+        with open(output_file, "w", encoding='utf-8') as file:
+            # 定义分类顺序
+            category_order = [
+                "央视频道",
+                "卫视频道",
+                "浙江频道",
+                "上海频道",
+                "北京频道",
+                "广东频道",
+                "江苏频道",
+                "湖南频道",
+                "山东频道",
+                "河南频道",
+                "河北频道",
+                "安徽频道",
+                "四川频道",
+                "内蒙频道",
+                "福建频道",
+                "江西频道",
+                "云南频道",
+                "贵州频道",
+                "广西频道",
+                "陕西频道",
+                "甘肃频道",
+                "青海频道",
+                "宁夏频道",
+                "新疆频道",
+                "西藏频道",
+                "海南频道",
+                "吉林频道",
+                "辽宁频道",
+                "黑龙江频道",
+                "山西频道",
+                "天津频道",
+                "重庆频道",
+                "地级市频道",
+                "体育频道",
+                "影视频道",
+                "少儿频道",
+                "新闻频道",
+                "其他频道"
+            ]
+            
+            # 记录已写入的分类
+            written_categories = set()
+            
+            for category in category_order:
+                if category in categorized_channels and categorized_channels[category]:
+                    channels = set()
+                    for channel in categorized_channels[category]:
+                        standardized = standardize_channel_name(channel)
+                        if standardized and is_valid_channel(standardized):
+                            channels.add(standardized)
+                    
+                    if channels:
+                        file.write(f"{category},#genre#\n")
+                        written_categories.add(category)
+                        
+                        # 对频道进行排序
+                        sorted_channels = sorted(channels, 
+                                              key=lambda x: lazy_pinyin(x.split(',')[0])[0] if ',' in x else '')
+                        
+                        # 特殊处理央视频道
+                        if category == "央视频道":
+                            cctv_channels = []
+                            other_channels = []
+                            
+                            for channel in sorted_channels:
+                                if ',' not in channel:
+                                    continue
+                                    
+                                name = channel.split(',')[0]
+                                if 'CCTV-' in name or 'CCTV' in name:
+                                    match = re.match(r'CCTV-?(\d+)', name)
+                                    if match:
+                                        num = int(match.group(1))
+                                        cctv_channels.append((num, channel))
+                                    elif 'CCTV-5+' in name:
+                                        cctv_channels.append((5.5, channel))
+                                    else:
+                                        other_channels.append(channel)
+                                else:
+                                    other_channels.append(channel)
+                            
+                            cctv_channels.sort()
+                            for _, channel in cctv_channels:
+                                file.write(f"{channel}\n")
+                            for channel in sorted(other_channels):
+                                file.write(f"{channel}\n")
+                        else:
+                            # 其他分类直接写入排序后的频道
+                            for channel in sorted_channels:
+                                if ',' in channel:
+                                    file.write(f"{channel}\n")
+                        
+                        file.write("\n")
+            
+            print(f"成功写入频道到文件: {output_file}")
+            print(f"共写入 {sum(len(channels) for channels in categorized_channels.values())} 个频道")
+            
+    except Exception as e:
+        print(f"写入文件时出错: {str(e)}")
+        raise
+
 def fetch_and_merge():
     """获取并合并直播源"""
     urls = [
-                # 可靠的源
         "https://iptv.b2og.com/txt/fmml_ipv6.txt",
         "https://iptv.002397.xyz/txt/fmml_ipv6.txt",
         "https://m3u.ibert.me/txt/o_s_cn_cctv.txt",
@@ -574,157 +791,60 @@ def fetch_and_merge():
         "https://iptv.b2og.com/txt/j_home.txt",
         "http://xhztv.top/xhz/live.txt",
         "http://live.kilvn.com/iptv.m3u",
-        "https://raw.githubusercontent.com/kimwang1978/collect-tv-txt/87b72fdfc629f3907ce5b407f4fa21f49ec6f06e/live_lite.txt",
-        "https://raw.githubusercontent.com/vbskycn/iptv/15129a4fcb31a6855d2dd3f43936399726383784/tv/hd.txt",
     ]
     
     print("\n开始获取和合并直播源...")
-    
     categorized_channels = defaultdict(set)
-    url_cache = {}
     
     for url in urls:
         try:
-            if url in url_cache:
-                content = url_cache[url]
-            else:
-                print(f"\n获取 {url}...")
-                content = fetch_url_with_retry(url)
-                if content:
-                    if url.endswith('.m3u') or url.endswith('.m3u8') or '#EXTM3U' in content:
-                        content = parse_m3u(content)
-                        # 使用 len() 和 split() 的替代写法
-                        line_count = sum(1 for line in content.splitlines())
-                        print(f"解析到 {line_count} 行内容")
-                    url_cache[url] = content
-                else:
-                    print(f"无法获取内容: {url}")
-                    continue
+            print(f"\n获取 {url}...")
+            content = fetch_url_with_retry(url)
+            if not content:
+                continue
+                
+            if url.endswith('.m3u') or url.endswith('.m3u8') or '#EXTM3U' in content:
+                content = parse_m3u(content)
             
             # 处理每个频道
-            for line in content.split('\n'):
-                if line.strip():
-                    # 跳过分类标题行
-                    if line.endswith(',#genre#'):
-                        continue
-                        
+            for line in content.splitlines():
+                line = line.strip()
+                if line and not line.endswith(',#genre#'):
                     category, channel = categorize_channel(line)
-                    if category and channel:
-                        categorized_channels[category].add(channel)
+                    if category and channel and is_valid_channel(channel):
+                        standardized = standardize_channel_name(channel)
+                        if standardized:
+                            categorized_channels[category].add(standardized)
             
-            # 显示分类结果
-            print("\n当前分类结果:")
-            for category, channels in categorized_channels.items():
-                if category == "央视频道":
-                    print(f"\n{category} 包含的频道:")
-                    for channel in channels:
-                        if 'CCTV-' in channel:
-                            print(f"  - {channel.split(',')[0]}")
-                            
+            print(f"已处理 {sum(len(channels) for channels in categorized_channels.values())} 个频道")
+            
         except Exception as e:
             print(f"处理源 {url} 时出错: {str(e)}")
             continue
     
-    # 在写入文件之前进行重新分类
-    reclassify_other_channels(categorized_channels)
+    print("\n开始验证频道可用性并测试延迟...")
+    categorized_channels = asyncio.run(validate_and_sort_channels(categorized_channels))
     
-    # 输出统计信息
-    print("\n" + "="*50)
-    total_channels = sum(len(channels) for channels in categorized_channels.values())
-    print(f"\nTotal valid channels found: {total_channels}")
-    for category, channels in categorized_channels.items():
-        print(f"{category}: {len(channels)} channels")
-    print("="*50 + "\n")
-    
-    # 创建输出目录
-    output_dir = os.path.join(os.path.dirname(__file__), "..", "txt")
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # 写入分类后的文件
-    output_file = os.path.join(output_dir, "merged_file.txt")
+    # 写入合并后的频道到文件
+    output_file = "txt/merged_file.txt"
     write_channels_to_file(output_file, categorized_channels)
+    
+    return categorized_channels
 
-def write_channels_to_file(output_file, categorized_channels):
-    """将频道写入文件"""
-    with open(output_file, "w", encoding='utf-8') as file:
-        # 定义分类顺序
-        category_order = [
-            "央视频道",
-            "卫视频道",
-            "浙江频道",
-            "上海频道",
-            "北京频道",
-            "广东频道",
-            "江苏频道",
-            "湖南频道",
-            "山东频道",
-            "河南频道",
-            "河北频道",
-            "安徽频道",
-            "四川频道",
-            "内蒙频道",
-            "体育频道",
-            "影视频道",
-            "少儿频道",
-            "新闻频道",
-            "其他频道"
-        ]
+def main():
+    """主函数"""
+    try:
+        print("开始执行IPTV频道合并...")
         
-        # 合并相同分类的频道
-        merged_channels = defaultdict(set)
-        for category, channels in categorized_channels.items():
-            # 移除重复的分类标题行
-            channels = {ch for ch in channels if not ch.endswith(',#genre#')}
-            merged_channels[category].update(channels)
+        # 获取并合并频道
+        categorized_channels = fetch_and_merge()
         
-        # 按顺序写入分类
-        for category in category_order:
-            if category in merged_channels and merged_channels[category]:
-                # 写入分类标题
-                file.write(f"{category},#genre#\n")
-                
-                # 对频道进行排序
-                sorted_channels = sorted(merged_channels[category], 
-                                      key=lambda x: lazy_pinyin(x.split(',')[0])[0])
-                
-                # 特殊处理央视频道
-                if category == "央视频道":
-                    cctv_channels = []
-                    other_channels = []
-                    
-                    for channel in sorted_channels:
-                        if 'CCTV-' in channel:
-                            # 提取频道号用于排序
-                            match = re.match(r'CCTV-(\d+)', channel)
-                            if match:
-                                num = int(match.group(1))
-                                cctv_channels.append((num, channel))
-                            elif 'CCTV-5+' in channel:
-                                cctv_channels.append((5.5, channel))
-                        else:
-                            other_channels.append(channel)
-                    
-                    # 按频道号排序CCTV频道
-                    cctv_channels.sort()
-                    for _, channel in cctv_channels:
-                        file.write(f"{channel}\n")
-                        
-                    # 写入其他央视频道
-                    for channel in sorted(other_channels):
-                        file.write(f"{channel}\n")
-                else:
-                    # 其他分类直接写入排序后的频道
-                    for channel in sorted_channels:
-                        file.write(f"{channel}\n")
-                
-                # 添加空行分隔不同分类
-                file.write("\n")
+        print(f"\n处理完成！")
+        print(f"- 总频道数: {sum(len(channels) for channels in categorized_channels.values())}")
+        
+    except Exception as e:
+        print(f"执行过程中出错: {str(e)}")
+        raise
 
 if __name__ == "__main__":
-    start_time = time.time()
-    
-    # 运行主程序
-    fetch_and_merge()
-    
-    end_time = time.time()
-    print(f"\nTotal processing time: {end_time - start_time:.2f} seconds")
+    main()
