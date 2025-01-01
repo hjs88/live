@@ -792,6 +792,11 @@ def fetch_and_merge():
         "http://xhztv.top/xhz/live.txt",
         "http://live.kilvn.com/iptv.m3u",
         "http://xhztv.top/new.txt",
+        "https://raw.githubusercontent.com/kimwang1978/collect-tv-txt/64a2725dbc6de1a567e85e8778ff8b7dcd428d7a/live_lite.txt",
+        "https://raw.githubusercontent.com/kilvn/iptv/4ab2e2f82198ad931dcdcccf995793f62c459d76/iptv.m3u",
+        "https://raw.githubusercontent.com/supperthomas/TV/3e226079060fe9f099e91c12b97462281c6916e4/result.txt",
+        "https://raw.githubusercontent.com/qingshujun/raoping/49396cab34c46a5a48bd916e7c54818e74fce5d8/jingzhou.txt",
+        "https://raw.githubusercontent.com/kelopanda/TvSources/00ba55d187faa19509c794856a1858407b5d4609/self.txt",
         
     ]
     
