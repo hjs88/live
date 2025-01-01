@@ -791,6 +791,8 @@ def fetch_and_merge():
         "https://iptv.b2og.com/txt/j_home.txt",
         "http://xhztv.top/xhz/live.txt",
         "http://live.kilvn.com/iptv.m3u",
+        "http://xhztv.top/new.txt",
+        
     ]
     
     print("\n开始获取和合并直播源...")
