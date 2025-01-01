@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   update-iptv:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Checkout repository
@@ -27,7 +27,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install requests aiohttp tqdm pypinyin
+        pip install requests aiohttp tqdm pypinyin urllib3 asyncio
         
     - name: Enable IPv6
       run: |
@@ -35,14 +35,16 @@ jobs:
         sudo sysctl -w net.ipv6.conf.default.disable_ipv6=0
     
     - name: Run merge script
-      run: python scripts/merge_iptv.py
+      run: |
+        mkdir -p txt
+        python scripts/merge_iptv.py
         
     - name: Commit and push changes
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git add txt/merged_file.txt
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Update merged IPTV list" && git push origin HEAD)
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update merged IPTV list" && git push)
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
