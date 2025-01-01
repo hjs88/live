@@ -797,6 +797,7 @@ def fetch_and_merge():
         "https://raw.githubusercontent.com/supperthomas/TV/3e226079060fe9f099e91c12b97462281c6916e4/result.txt",
         "https://raw.githubusercontent.com/qingshujun/raoping/49396cab34c46a5a48bd916e7c54818e74fce5d8/jingzhou.txt",
         "https://raw.githubusercontent.com/kelopanda/TvSources/00ba55d187faa19509c794856a1858407b5d4609/self.txt",
+        "https://raw.githubusercontent.com/LeeHarpen/LHPTV/c8174c67da97c568c6d799dad055df9eb92a98aa/LHPTV",
         
     ]
     
