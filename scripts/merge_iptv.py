@@ -64,6 +64,9 @@ def standardize_channel_name(line):
         if not channel_name or not url:
             return None
             
+        # 标准化频道名称
+        channel_name = normalize_channel_name(channel_name)
+        
         # 移除URL中的多余参数
         if '$' in url:
             url = url.split('$')[0]
@@ -71,6 +74,67 @@ def standardize_channel_name(line):
         return f"{channel_name},{url}"
     except:
         return None
+
+def normalize_channel_name(name):
+    """统一频道名称格式"""
+    # 移除特殊字符和空格
+    name = name.strip()
+    name = re.sub(r'[_\s\-]+', ' ', name)
+    
+    # CCTV频道标准化
+    if 'CCTV' in name.upper():
+        # 提取频道号
+        match = re.search(r'CCTV-?(\d+)([^\d].*)?', name.upper())
+        if match:
+            channel_num = match.group(1)
+            suffix = match.group(2) if match.group(2) else ''
+            if suffix and '高清' in suffix:
+                suffix = ''
+            return f"CCTV-{channel_num}{suffix}"
+        elif 'CCTV-5+' in name.upper():
+            return 'CCTV-5+'
+        elif 'CCTV' in name.upper():
+            return name.upper()
+    
+    # 卫视频道标准化
+    if '卫视' in name:
+        # 移除"高清"、"HD"等后缀
+        name = re.sub(r'(高清|HD|标清|SD|蓝光|([_\-]\d+))', '', name, flags=re.IGNORECASE)
+        # 确保"卫视"在名称末尾
+        if not name.endswith('卫视'):
+            name = name.replace('卫视', '') + '卫视'
+    
+    # 其他频道标准化
+    name_mapping = {
+        r'(?:凤凰)?资讯台?': '凤凰资讯',
+        r'(?:凤凰)?中文台?': '凤凰中文',
+        r'(?:凤凰)?香港台?': '凤凰香港',
+        r'翡翠台': 'TVB翡翠',
+        r'明珠台': 'TVB明珠',
+        r'无线新闻': 'TVB新闻',
+        r'无线财经': 'TVB财经',
+        r'J2': 'TVB J2',
+        r'星空卫视': '星空频道',
+        # 可以继续添加其他映射...
+    }
+    
+    for pattern, replacement in name_mapping.items():
+        if re.search(pattern, name, re.IGNORECASE):
+            return replacement
+    
+    # 移除通用后缀
+    name = re.sub(r'(高清|HD|标清|SD|蓝光|([_\-]\d+))', '', name, flags=re.IGNORECASE)
+    
+    # 省级卫视频道标准化
+    if any(province in name for province in PROVINCES):
+        for province in PROVINCES:
+            if province in name:
+                if '卫视' in name:
+                    return f"{province}卫视"
+                else:
+                    return f"{province}频道"
+    
+    return name.strip()
 
 def is_valid_channel(channel_line):
     """检查频道名称是否有效（不含乱码）"""
@@ -562,51 +626,106 @@ def fetch_url_with_retry(url, max_retries=3, timeout=10):
             
     return None
 
-async def test_channel_url_async(session, url, timeout=1):
+async def test_channel_url_async(session, url, timeout=2, max_retries=2):
     """异步测试频道URL是否可用"""
-    try:
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': '*/*'
-        }
-        async with session.head(url, 
-                              timeout=timeout,
-                              headers=headers,
-                              allow_redirects=True,
-                              ssl=False) as response:
-            return response.status < 400
-    except:
-        return False
+    for retry in range(max_retries):
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*',
+                'Range': 'bytes=0-1024'  # 只请求前1KB数据
+            }
+            
+            # 先尝试HEAD请求
+            async with session.head(url, 
+                                  timeout=timeout,
+                                  headers=headers,
+                                  allow_redirects=True,
+                                  ssl=False) as response:
+                if response.status < 400:
+                    return True
+                    
+            # 如果HEAD失败，尝试GET请求
+            async with session.get(url,
+                                 timeout=timeout,
+                                 headers=headers,
+                                 allow_redirects=True,
+                                 ssl=False) as response:
+                if response.status < 400:
+                    # 检查内容类型
+                    content_type = response.headers.get('Content-Type', '').lower()
+                    if any(t in content_type for t in ['video', 'application', 'stream']):
+                        return True
+                    # 读取少量数据检查格式
+                    data = await response.content.read(1024)
+                    if data.startswith(b'#EXTM3U') or b'.ts' in data:
+                        return True
+                        
+        except asyncio.TimeoutError:
+            if retry == max_retries - 1:
+                return False
+            await asyncio.sleep(0.5)
+        except Exception:
+            if retry == max_retries - 1:
+                return False
+            await asyncio.sleep(0.5)
+    return False
 
-async def test_channel_latency(session, url, timeout=1):
+async def test_channel_latency(session, url, timeout=2, max_retries=2):
     """测试频道延迟"""
-    try:
-        start_time = time.time()
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Accept': '*/*'
-        }
-        async with session.head(url, 
-                              timeout=timeout,
-                              headers=headers,
-                              allow_redirects=True,
-                              ssl=False) as response:
-            if response.status < 400:
-                return time.time() - start_time
-    except:
-        pass
-    return float('inf')
+    min_latency = float('inf')
+    
+    for retry in range(max_retries):
+        try:
+            start_time = time.time()
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*',
+                'Range': 'bytes=0-1024'
+            }
+            
+            async with session.head(url, 
+                                  timeout=timeout,
+                                  headers=headers,
+                                  allow_redirects=True,
+                                  ssl=False) as response:
+                if response.status < 400:
+                    latency = time.time() - start_time
+                    min_latency = min(min_latency, latency)
+                    
+                    # 进行多次测试取平均值
+                    if min_latency != float('inf'):
+                        latencies = [min_latency]
+                        for _ in range(2):  # 额外测试2次
+                            start_time = time.time()
+                            async with session.head(url, 
+                                                  timeout=timeout,
+                                                  headers=headers,
+                                                  allow_redirects=True,
+                                                  ssl=False) as resp:
+                                if resp.status < 400:
+                                    latencies.append(time.time() - start_time)
+                        # 取平均值
+                        if len(latencies) > 1:
+                            min_latency = sum(latencies) / len(latencies)
+                    
+                    return min_latency
+                    
+        except:
+            if retry == max_retries - 1:
+                return float('inf')
+            await asyncio.sleep(0.5)
+            
+    return min_latency
 
 async def validate_and_sort_channels(categorized_channels):
     """异步验证频道并按延迟排序"""
     valid_channels = defaultdict(lambda: defaultdict(list))
-    
-    # 创建信号量限制并发数
-    sem = asyncio.Semaphore(50)  # 最大并发数
+    sem = asyncio.Semaphore(30)  # 限制并发数
     
     async def test_single_channel(session, category, name, channel):
         """测试单个频道"""
-        async with sem:  # 使用信号量控制并发
+        async with sem:
             try:
                 url = channel.split(',')[1].strip()
                 is_valid = await test_channel_url_async(session, url)
@@ -617,8 +736,10 @@ async def validate_and_sort_channels(categorized_channels):
                 print(f"! 测试出错 {name}: {str(e)}")
         return None
     
-    async with aiohttp.ClientSession() as session:
-        # 创建所有测试任务
+    connector = aiohttp.TCPConnector(limit=30, force_close=True)
+    timeout = aiohttp.ClientTimeout(total=10)
+    
+    async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
         tasks = []
         for category, channels in categorized_channels.items():
             print(f"\n测试 {category} 频道...")
@@ -627,7 +748,6 @@ async def validate_and_sort_channels(categorized_channels):
                 task = test_single_channel(session, category, name, channel)
                 tasks.append(task)
         
-        # 并发执行所有任务
         with tqdm(total=len(tasks), desc="测试进度") as pbar:
             for coro in asyncio.as_completed(tasks):
                 result = await coro
@@ -641,9 +761,7 @@ async def validate_and_sort_channels(categorized_channels):
     result = defaultdict(list)
     for category, name_channels in valid_channels.items():
         for name, channels in name_channels.items():
-            # 按延迟排序
-            channels.sort(key=lambda x: x[0])
-            # 只保留延迟信息
+            channels.sort(key=lambda x: x[0])  # 按延迟排序
             result[category].extend([channel for _, channel in channels])
     
     return result
